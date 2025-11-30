@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Panel Licencji</title>
+<style>
+body { font-family: Arial; background:#111; color:#fff; padding:20px; }
+input,button { padding:10px; margin:5px; }
+</style>
+</head>
+<body>
+
+<h1>🔐 Panel Zarządzania Licencjami</h1>
+
+<h3>Dodaj licencję</h3>
+<input id="license" placeholder="Klucz licencji">
+<input id="botId" placeholder="Bot ID">
+<button onclick="create()">Dodaj</button>
+
+<h3>Banuj licencję</h3>
+<input id="banKey" placeholder="Klucz">
+<button onclick="ban()">Banuj</button>
+
+<script>
+function create() {
+  fetch("/create", {
+    method:"POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({
+      license: document.getElementById("license").value,
+      botId: document.getElementById("botId").value
+    })
+  }).then(r=>r.json()).then(a=>alert("Licencja dodana!"));
+}
+
+function ban() {
+  fetch("/ban", {
+    method:"POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({
+      license: document.getElementById("banKey").value
+    })
+  }).then(r=>r.json()).then(a=>alert("Licencja zbanowana!"));
+}
+</script>
+
+</body>
+</html>
