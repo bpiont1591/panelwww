@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CDA Video Player - Pro</title>
+    <title>CDA Pro Player - Anti Block</title>
     <style>
         body {
-            background-color: #1a1a1a;
-            color: #fff;
+            background-color: #121212;
+            color: #e0e0e0;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
             flex-direction: column;
@@ -17,37 +17,39 @@
             margin: 0;
         }
         .container {
-            width: 90%;
-            max-width: 900px;
-            background: #2b2b2b;
+            width: 95%;
+            max-width: 800px;
+            background: #1e1e1e;
             padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.6);
         }
-        h1 { text-align: center; color: #ff4d4d; margin-top: 0; }
+        h1 { text-align: center; color: #ff3333; margin-top: 0; font-size: 1.5rem; }
         video {
             width: 100%;
-            border-radius: 5px;
+            border-radius: 4px;
             background: #000;
+            max-height: 450px;
         }
         .status {
-            margin-top: 10px;
-            font-size: 0.9em;
+            margin-top: 15px;
+            font-size: 0.85em;
             color: #aaa;
             text-align: center;
+            min-height: 1.2em;
         }
         .error { color: #ff6b6b; }
         .success { color: #6bff6b; }
         
         /* Loader */
         .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #ff4d4d;
+            border: 3px solid #333;
+            border-top: 3px solid #ff3333;
             border-radius: 50%;
-            width: 30px;
-            height: 30px;
+            width: 24px;
+            height: 24px;
             animation: spin 1s linear infinite;
-            margin: 20px auto;
+            margin: 15px auto;
             display: none;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -56,84 +58,107 @@
 <body>
 
 <div class="container">
-    <h1>CDA Direct Player</h1>
+    <h1>CDA Direct Stream</h1>
     <div id="loader" class="loader"></div>
-    <video id="player" controls></video>
-    <div id="status" class="status">Wczytywanie...</div>
+    <video id="player" controls playsinline></video>
+    <div id="status" class="status">Inicjalizacja...</div>
 </div>
 
 <script>
     // ID filmu z Twojego linku
     const VIDEO_ID = "32492754e3"; 
-    const CDA_API_URL = `https://www.cda.pl/api.php?method=streamGetNew&data[material_id]=${VIDEO_ID}`;
+    const STATUS_EL = document.getElementById('status');
+    const LOADER = document.getElementById('loader');
+    const PLAYER = document.getElementById('player');
 
-    const statusEl = document.getElementById('status');
-    const loader = document.getElementById('loader');
-    const player = document.getElementById('player');
+    function setStatus(msg, type = "") {
+        STATUS_EL.textContent = msg;
+        STATUS_EL.className = "status " + type;
+    }
 
-    async function fetchCDA() {
-        showStatus("Łączenie z serwerami CDA...", "");
-        loader.style.display = "block";
+    async function startPlayer() {
+        showLoading(true);
+        setStatus("Pobieranie danych ze strony...");
 
         try {
-            // Pobieramy surowy HTML strony, aby wykruszyć tokeny i dane sesji
-            const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://www.cda.pl/video/' + VIDEO_ID + '/vfilm')}`);
-            if (!response.ok) throw new Error("Błąd połączenia");
+            // 1. Pobieramy stronę przez proxy aby ominąć CORS
+            const targetUrl = `https://www.cda.pl/video/${VIDEO_ID}/vfilm`;
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
             
-            const data = await response.json();
-            const html = data.contents;
+            let pageHtml = "";
+            try {
+                const res = await fetch(proxyUrl, {
+                    headers: {
+                        // Symulacja przeglądarki
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                pageHtml = await res.text();
+            } catch (e) {
+                throw new Error("Nie udało się pobraać strony CDA. Sprawdź czy film istnieje.");
+            }
 
-            // Szukamy obiektu smd2 w kodzie źródłowym (to jest API CDA)
-            const smdMatch = html.match(/var smd2 = JSON\.parse\(Base64\.decode\('([^']+)'\)\)/);
-            if (!smdMatch) throw new Error("Nie znaleziono konfiguracji API w kodzie strony.");
+            // 2. Szukamy zmiennej smd2 (JSON z danymi API)
+            const match = pageHtml.match(/var smd2 = JSON\.parse\(Base64\.decode\('([^']+)'\)\)/);
+            if (!match) throw new Error("Brak konfiguracji wideo na stronie.");
 
             // Dekodowanie Base64
-            const decodedJson = Base64.decode(smdMatch[1]);
-            const smdConfig = JSON.parse(decodedJson);
+            const decoded = Base64.decode(match[1]);
+            const config = JSON.parse(decoded);
 
-            // Wywołanie metody streamGetNew przez JSON-RPC
-            showStatus("Pobieranie metadanych filmu...", "");
-            
-            const rpcResponse = await fetch('https://www.cda.pl/api.php', {
+            setStatus("Łączenie z serwerem multimediów...");
+
+            // 3. Wywołujemy metodę streamGetNew
+            // Używamy fetch bezpośrednio do CDA, bo API zazwyczaj pozwala na żądania POST
+            const apiRes = await fetch('https://www.cda.pl/api.php', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0',
+                    'Referer': 'https://www.cda.pl/'
+                },
                 body: JSON.stringify({
                     jsonrpc: "2.0",
                     method: "streamGetNew",
-                    params: [{ material_id: parseInt(VIDEO_ID.replace('e3','')) }], // Upewnij się, że ID jest liczbą
+                    params: [{ material_id: parseInt(VIDEO_ID.replace('e3','')) }],
                     id: 1
                 })
             });
 
-            const result = await rpcResponse.json();
+            const data = await apiRes.json();
             
-            if (result.result && result.result.url) {
-                const videoUrl = result.result.url;
-                playVideo(videoUrl);
+            if (data.result && data.result.url) {
+                play(data.result.url);
             } else {
-                throw new Error("Brak linku do wideo w odpowiedzi API.");
+                // Alternatywna metoda: próba znalezienia direct URL w HTML
+                const directMatch = pageHtml.match(/src:\s*['"]([^'"]+\.mp4[^'"]*)['"]/);
+                if (directMatch) {
+                    play(directMatch[1]);
+                } else {
+                    throw new Error("Nie znaleziono bezpośredniego linku do pliku.");
+                }
             }
 
         } catch (err) {
             console.error(err);
-            showStatus(`Błąd: ${err.message}`, "error");
-            loader.style.display = "none";
+            setStatus(`❌ Błąd: ${err.message}`, "error");
+            showLoading(false);
         }
     }
 
-    function playVideo(url) {
-        player.src = url;
-        player.play();
-        showStatus("Film gotowy do oglądania!", "success");
-        loader.style.display = "none";
+    function play(url) {
+        PLAYER.src = url;
+        PLAYER.play().catch(e => console.log("Autoplay blocked:", e));
+        setStatus("✅ Odtwarzanie...", "success");
+        showLoading(false);
     }
 
-    function showStatus(msg, type) {
-        statusEl.textContent = msg;
-        statusEl.className = "status " + (type || "");
+    function showLoading(show) {
+        LOADER.style.display = show ? "block" : "none";
     }
 
-    // Implementacja Base64 decodera (zgodna z tym co używa CDA)
+    // Minimalistyczny dekodera Base64 zgodny z CDA
     var Base64 = {
         _keyStr: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
         decode: function (input) {
@@ -151,19 +176,15 @@
                 chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
                 chr3 = ((enc3 & 3) << 6) | enc4;
                 output = output + String.fromCharCode(chr1);
-                if (enc3 != 64) {
-                    output = output + String.fromCharCode(chr2);
-                }
-                if (enc4 != 64) {
-                    output = output + String.fromCharCode(chr3);
-                }
+                if (enc3 != 64) output += String.fromCharCode(chr2);
+                if (enc4 != 64) output += String.fromCharCode(chr3);
             }
             return output;
         }
     };
 
     // Start
-    fetchCDA();
+    startPlayer();
 </script>
 
 </body>
